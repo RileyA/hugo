@@ -55,7 +55,7 @@ func main() {
 	hub := hugo.CreateHubWithAddress(selectedAddress)
 
 	// The Hue API requires a username to be generated, with a press of
-	// a physical button on the Hue hub, after one is generated we'll store
+	// a physical button on the Hue hub. After one is generated we'll store
 	// it at ~/.hugo_username
 	configPath := os.Getenv("HOME") + "/.hugo_username"
 
@@ -101,4 +101,18 @@ func main() {
 	// If we got this far without returning, then we've got a valid hub
 	// address + username.
 	fmt.Println("Authentication successful.")
+
+	// Toggle all reachable lights.
+	// TODO(rileya): Actually make this an interactive interface-y thing.
+	for name, light := range hub.Lights {
+		newState := light.State
+		if light.State.Reachable {
+			newState.On = !newState.On
+			hub.SetLightState(name, newState)
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+		}
+	}
 }

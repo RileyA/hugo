@@ -19,6 +19,7 @@ type Hub struct {
 	httpAddress   string
 	username      string
 	authenticated bool
+	Lights        map[string]Light
 }
 
 type HueError struct {
@@ -38,7 +39,7 @@ func CreateHubWithAddress(address HubAddress) *Hub {
 	httpAddress := "http://" + address.InternalIpAddress + "/api"
 	username := ""
 	authenticated := false
-	return &Hub{httpAddress, username, authenticated}
+	return &Hub{httpAddress, username, authenticated, nil}
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -83,12 +84,16 @@ func (hub *Hub) AuthenticateExistingUser(username string) error {
 		return err
 	}
 
-	if authenticated {
-		hub.authenticated = true
-		return nil
+	if !authenticated {
+		return errors.New("Username: " + username + " could not be authenticated.")
 	}
 
-	return errors.New("Username: " + username + " could not be authenticated.")
+	hub.authenticated = true
+	err = hub.getLightStates()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -140,14 +145,68 @@ func (hub *Hub) AuthenticateNewUser(deviceType string, promptButtonPress func())
 		return "", errors.New("Failed to authenticate new user, did you press the hub button within 30 seconds?")
 	}
 
+	err = hub.getLightStates()
+	if err != nil {
+		return "", err
+	}
+
+	hub.username = hueSuccesses[0].Username
 	return hueSuccesses[0].Username, nil
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// If response is a hue error response, in the format:
-// [{"error": {...}},{"error": {...},...]
+// Set the state of a light by id.
+func (hub *Hub) SetLightState(id string, state LightState) error {
+	if !hub.authenticated {
+		return errors.New("Haven't authenticated with hub.")
+	}
+	if _, ok := hub.Lights[id]; !ok {
+		return errors.New("No light with 'id': " + id)
+	}
+	if light, _ := hub.Lights[id]; !light.State.Reachable {
+		return errors.New("Light with 'id': " + id + " is unreachable.")
+	}
+	marshalledState, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest("PUT", hub.httpAddress+"/"+hub.username+"/lights/"+id+"/state", nil)
+	request.Body = ioutil.NopCloser(bytes.NewBuffer(marshalledState))
+	client := &http.Client{}
+	response, err := client.Do(request)
+	// TODO(rileya): Report errors here.
+	response.Body.Close()
+	return nil
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// Get the current state of all connected lights.
+func (hub *Hub) getLightStates() error {
+	response, err := http.Get(hub.httpAddress + "/" + hub.username + "/lights")
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	bodyContents, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(bodyContents, &hub.Lights)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+/////////////////////////////////////////////////////////////////////////////
+// If response is a hue error/success response, in the format:
 //
-// This returns each error as a HueError struct.
+// [{"error": {...}},{"error": {...},...]
+// or
+// [{"success": {...}}]
+//
+// This returns arrays of each error and success object.
 func parseHueResponses(response *http.Response) ([]HueSuccess, []HueError, error) {
 	bodyContents, err := ioutil.ReadAll(response.Body)
 

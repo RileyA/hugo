@@ -35,7 +35,7 @@ func FindHubAddresses() ([]HubAddress, error) {
 		return nil, err
 	}
 
-	// Dig out results out of the JSON and return 'em.
+	// Dig out results from the JSON and return 'em.
 	var addresses []HubAddress
 	json.Unmarshal(bodyContents, &addresses)
 	return addresses, nil
